@@ -1,0 +1,556 @@
+# Task 0: Install a ubuntu 16.04 server 64-bit
+
+either in a physical machine or a virtual machine
+
+http://releases.ubuntu.com/16.04/<br>
+http://releases.ubuntu.com/16.04/ubuntu-16.04.6-server-amd64.iso<br>
+https://www.virtualbox.org/
+
+for VM, use NAT network and forward required ports to host machine
+- 22->2222 for ssh
+- 80->8080 for gitlab
+- 8081/8082->8081/8082 for go app
+- 31080/31081->31080/31081 for go app in k8s
+
+## 环境  vmware-workstation pro; ubuntu-16.04.6-server-amd64.iso；Xshell 5;
+
+yuze@ubuntu1604:~$ sudo apt-get update
+
+yuze@ubuntu1604:~$ sudo apt-get openssh-server openssh-client
+
+yuze@ubuntu1604:~$ sudo vim /etc/ssh/sshd_config
+
+yuze@ubuntu1604:~$ sudo /etc/init.d/ssh restart 
+
+yuze@ubuntu1604:~$ ssh yuze@ubuntu1604 -p 22
+
+ssh: connect to host ubuntu1604 port 22: Connection refused
+
+yuze@ubuntu1604:~$ ssh yuze@ubuntu1604 -p 2222
+yuze@ubuntu1604's password: 
+
+用户名：yuze
+
+密码：123456
+
+# Task 1: Update system
+
+ssh to guest machine from host machine ($ ssh user@localhost -p 2222) and update the system to the latest
+
+https://help.ubuntu.com/16.04/serverguide/apt.html
+
+upgrade the kernel to the 16.04 latest
+
+## kernel to latest
+
+yuze@ubuntu1604:~$ uname -r
+
+4.4.0-142-generic
+
+http://kernel.ubuntu.com/~kernel-ppa/mainline/ 
+
+Build for amd64 succeeded (see BUILD.LOG.amd64):
+  linux-headers-4.4.214-0404214_4.4.214-0404214.202002150640_all.deb
+  linux-headers-4.4.214-0404214-generic_4.4.214-0404214.202002150640_amd64.deb
+  linux-headers-4.4.214-0404214-lowlatency_4.4.214-0404214.202002150640_amd64.deb
+  linux-image-unsigned-4.4.214-0404214-generic_4.4.214-0404214.202002150640_amd64.deb
+  linux-image-unsigned-4.4.214-0404214-lowlatency_4.4.214-0404214.202002150640_amd64.deb
+  linux-modules-4.4.214-0404214-generic_4.4.214-0404214.202002150640_amd64.deb
+  linux-modules-4.4.214-0404214-lowlatency_4.4.214-0404214.202002150640_amd64.deb
+
+yuze@ubuntu1604:~/v4.4.214$ sudo dpkg -i *.deb
+
+yuze@ubuntu1604:~$ uname -sr
+
+Linux 4.4.214-0404214-lowlatency
+
+## Task 2: install gitlab-ce version in the host
+
+https://about.gitlab.com/install/#ubuntu?version=ce
+
+Expect output: Gitlab is up and running at http://127.0.0.1 (no tls or FQDN required)
+
+Access it from host machine http://127.0.0.1:8080
+    
+### Gitlab 
+
+yuze@ubuntu1604:~$ sudo apt-get install curl openssh-server ca-certificates postfix
+    
+yuze@ubuntu1604:~$ curl https://packages.gitlab.com/gpg.key 2> /dev/null | sudo apt-key add - &>/dev/null
+        
+yuze@ubuntu1604:~$ sudo apt-get update
+    
+yuze@ubuntu1604:~$ sudo apt-get install gitlab-ce   
+
+root@k8s-master01:/home/yuze# vi /etc/apt/sources.list.d/gitlab-ce.list
+
+deb https://mirrors.tuna.tsinghua.edu.cn/gitlab-ce/ubuntu xenial main
+    
+yuze@ubuntu1604:~$ sudo gitlab-ctl reconfigure
+        
+yuze@ubuntu1604:~$ sudo gitlab-ctl status   
+
+    
+yuze@ubuntu1604:~$ sudo vim /etc/gitlab/gitlab.rb
+
+unicorn['listen'] = '127.0.0.1'
+
+unicorn['port'] = 8080
+
+external_url '127.0.0.1:8080'
+
+nginx['listen_port'] = 8080
+
+yuze@ubuntu1604:~$ sudo vim /var/opt/gitlab/gitlab-rails/etc/unicorn.rb
+
+listen "127.0.0.1:8080", :tcp_nopush => true
+    
+yuze@ubuntu1604:~$ sudo vim /opt/gitlab/embedded/service/gitlab-rails/config/gitlab.yml
+
+gitlab:
+
+    host: 127.0.0.1
+    
+    port: 8080
+    
+    https: false
+
+yuze@ubuntu1604:~$ sudo vim /var/opt/gitlab/nginx/conf/gitlab-http.conf
+
+server {
+  #listen *:80;
+  listen *:8080;
+    
+yuze@ubuntu1604:~$ sudo gitlab-ctl restart
+
+yuze@ubuntu1604:~$ curl http://127.0.0.1:8080
+
+<html><body>You are being <a
+
+href="http://127.0.0.1:8080/users/sign_in">redirected</a>.</body></html>
+    
+gitlab 密码：12345678
+
+### Task 3: create a demo group/project in gitlab
+
+named demo/go-web-hello-world (demo is group name, go-web-hello-world is project name).
+
+Use golang to build a hello world web app (listen to 8081 port) and check-in the code to mainline.
+
+https://golang.org/<br>
+https://gowebexamples.com/hello-world/
+
+Expect source code at http://127.0.0.1:8080/demo/go-web-hello-world
+        
+yuze@ubuntu1604:~$ sudo apt-get install git  
+    
+yuze@ubuntu1604:~$ git config --global user.name "yuze"
+
+yuze@ubuntu1604:~$ git config --global user.email "yuze@example.com"
+
+yuze@ubuntu1604:~$ ssh-keygen -C "yuze@example.com" -t rsa
+
+#### 修改 gitlab 的 ssh 端口 为 2222
+    
+yuze@ubuntu1604:~$ sudo vim /etc/gitlab/gitlab.rb
+
+gitlab_rails['gitlab_shell_ssh_port'] = 2222
+
+yuze@k8s-master01:~$ sudo gitlab-ctl reconfigure
+
+yuze@ubuntu1604:~$ sudo gitlab-ctl restart
+
+yuze@k8s-master01:~$ sudo gitlab-ctl status
+    
+yuze@ubuntu1604:~$ git clone ssh://git@127.0.0.1:2222/demo/go-web-hello-world.git
+
+### Task 4: build the app and expose ($ go run) the service to 8081 port
+
+Expect output: 
+```
+curl http://127.0.0.1:8081
+Go Web Hello World!
+
+#### 配置 go 环境 
+
+yuze@ubuntu1604:~/go1.13.8/go_demo$ sudo tar zxvf go1.13.8.linux-amd64.tar.gz -C /usr/local        
+            
+yuze@ubuntu1604:~/go1.13.8/go_demo$ vim ~/.bashrc
+                
+export GOROOT=/usr/local/go
+
+export GOPATH=/home/yuze/go1.13.8/go_demo
+
+export PATH=$PATH:$GOPATH:/usr/local/go/bin
+
+yuze@ubuntu1604:~/go1.13.8/go_demo$ source ~/.bashrc
+
+yuze@ubuntu1604:~/go1.13.8/go_demo$ sudo vim go_hello.go
+    
+package main
+
+import (
+
+	"fmt"
+
+	"net/http"
+)
+
+func handler(w http.ResponseWriter, r *http.Request) {
+
+	fmt.Fprintf(w, "Go Web Hello World! %s", r.URL.Path[1:])
+
+}
+
+
+func main() {
+
+	http.HandleFunc("/", handler)
+
+	http.ListenAndServe(":8081", nil)
+
+}
+    g
+yuze@k8s-master01:~$ curl 127.0.0.1:8081
+
+Go Web Hello World!
+
+yuze@ubuntu1604:~/go-web-hello-world$ git add go_hello.go 
+
+yuze@ubuntu1604:~/go-web-hello-world$ git commit -m "Go Web Hello World!"
+
+yuze@ubuntu1604:~/go-web-hello-world$ git push -u origin master
+Counting objects: 3, done.
+Delta compression using up to 2 threads.
+Compressing objects: 100% (2/2), done.
+Writing objects: 100% (3/3), 404 bytes | 0 bytes/s, done.
+Total 3 (delta 0), reused 0 (delta 0)
+To ssh://git@127.0.0.1:2222/demo/go-web-hello-world.git
+ * [new branch]      master -> master
+Branch master set up to track remote branch master from origin.
+
+
+
+yuze@ubuntu1604:~/go1.13.8/go_demo$ go run go_hello.go 
+Go Web Hello World!
+
+yuze@ubuntu1604:~/go1.13.8/go_demo$ curl http://127.0.0.1:8081
+Go Web Hello World!
+
+
+### Task 5: install docker
+https://docs.docker.com/install/linux/docker-ce/ubuntu/
+    
+yuze@ubuntu1604:~$ uname -a
+Linux ubuntu1604 4.4.214-0404214-lowlatency #202002150640 SMP PREEMPT Sat Feb 15 11:49:22 UTC 2020 x86_64 x86_64 x86_64 GNU/Linux
+
+yuze@ubuntu1604:~$ cat /proc/version
+Linux version 4.4.214-0404214-lowlatency (kernel@tangerine) (gcc version 5.4.0 20160609 (Ubuntu 5.4.0-6ubuntu1~16.04.12) ) #202002150640 SMP PREEMPT Sat Feb 15 11:49:22 UTC 2020
+
+
+yuze@ubuntu1604:~$ sudo apt-get install \
+>     apt-transport-https \
+>     ca-certificates \
+>     curl \
+>     gnupg-agent \
+>     software-properties-common
+
+yuze@ubuntu1604:~$ curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo apt-key add -
+OK
+
+yuze@ubuntu1604:~$ sudo apt-key fingerprint 0EBFCD88
+
+pub   4096R/0EBFCD88 2017-02-22
+
+      Key fingerprint = 9DC8 5822 9FC7 DD38 854A  E2D8 8D81 803C 0EBF CD88
+      
+uid                  Docker Release (CE deb) <docker@docker.com>
+
+sub   4096R/F273FCD8 2017-02-22
+
+yuze@ubuntu1604:~$ lsb_release -cs
+xenial
+
+yuze@ubuntu1604:~$ sudo add-apt-repository"deb [arch=amd64]
+https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable"
+
+yuze@k8s-master01:~/go-web-hello-world$ sudo vim /etc/apt/sources.list
+
+deb [arch=amd64] https://download.docker.com/linux/ubuntu xenial stable
+
+yuze@ubuntu1604:~$ sudo apt-get update
+    
+yuze@ubuntu1604:~$ sudo apt-get install docker-ce docker-ce-cli containerd.io
+
+### Task 6: run the app in container
+
+build a docker image ($ docker build) for the web app and run that in a container ($ docker run), expose the service to 8082 (-p)
+
+https://docs.docker.com/engine/reference/commandline/build/
+
+Check in the Dockerfile into gitlab
+
+Expect output:
+```
+curl http://127.0.0.1:8082
+Go Web Hello World!
+
+
+yuze@ubuntu1604:~$ sudo usermod -aG docker yuze
+
+yuze@ubuntu1604:~$ sudo service docker restart
+
+yuze@ubuntu1604:~$ sudo docker info  
+    
+yuze@ubuntu1604:~$ docker -v
+
+Docker version 19.03.6, build 369ce74a3c
+
+#### 添加阿里云镜像
+
+yuze@ubuntu1604:~/web-app$ sudo vim /etc/docker/daemon.json
+
+yuze@ubuntu1604:/etc/docker$ sudo chmod 777 daemon.json 
+
+yuze@ubuntu1604:/etc/docker$ sudo systmectl restart docker
+
+yuze@ubuntu1604:/etc/docker$ docker run hello-world
+
+### Dockerfile
+
+yuze@ubuntu1604:~/go1.13.8/go_demo$ vim main.go
+
+package main
+
+import (
+    "net/http"
+    "fmt"
+)
+
+func main() {
+
+    http.HandleFunc("/", func(writer http.ResponseWriter, request *http.Request) {
+        
+        fmt.Fprint(writer, "Go Web Hello World!")
+    
+    })
+    
+    http.ListenAndServe(":8082",nil)
+}
+
+yuze@ubuntu1604:~/go1.13.8/go_demo$ go build -o main
+    
+yuze@ubuntu1604:~/go1.13.8/go_demo$ sudo vim Dockerfile
+
+yuze@ubuntu1604:~/go1.13.8/go_demo$ docker build -t main .
+
+yuze@ubuntu1604:~/go1.13.8/go_demo$ cat Dockerfile 
+
+FROM golang:latest 
+
+WORKDIR /
+
+ADD main /
+
+EXPOSE 8082
+
+ENTRYPOINT ["./main"]
+
+yuze@ubuntu1604:~/go1.13.8/go_demo$ sudo docker images
+
+
+REPOSITORY          TAG                 IMAGE ID            CREATED             SIZE
+
+web                 latest              146b290b842d        3 minutes ago       810MB
+
+golang              latest              297e5bf50f50        2 days ago          803MB
+
+hello-world         latest              fce289e99eb9        13 months ago       1.84kB
+
+
+yuze@ubuntu1604:~/go1.13.8/go_demo$ curl http://127.0.0.1:8082
+
+Go Web Hello World!
+
+
+### Task 7: push image to dockerhub
+
+tag the docker image using your_dockerhub_id/go-web-hello-world:v0.1 and push it to docker hub (https://hub.docker.com/)
+
+Expect output: https://hub.docker.com/repository/docker/your_dockerhub_id/go-web-hello-world
+        
+        
+yuze@ubuntu1604:~/go1.13.8/go_demo$ docker images
+    
+REPOSITORY          TAG                 IMAGE ID            CREATED             SIZE
+
+web                 latest              146b290b842d        About an hour ago   810MB
+
+yuze@ubuntu1604:~/go1.13.8/go_demo$ docker tag web dading/go-web-hello-world:v0.1
+
+yuze@ubuntu1604:~/go1.13.8/go_demo$ docker images
+    
+REPOSITORY                  TAG                 IMAGE ID            CREATED             SIZE
+
+dading/go-web-hello-world   v0.1                146b290b842d        About an hour ago   810MB
+
+web                         latest              146b290b842d        About an hour ago   810MB
+
+
+yuze@ubuntu1604:~/go1.13.8/go_demo$ docker login
+    
+    
+yuze@ubuntu1604:~/go1.13.8/go_demo$ docker push dading/go-web-hello-world
+    
+The push refers to repository [docker.io/dading/go-web-hello-world]
+
+Get https://registry-1.docker.io/v2/: net/http: request canceled (Client.Timeout exceeded while awaiting headers)
+
+v0.1: digest: sha256:8abb61f15336ef77bf37d6f6cec3ca43ae1c4fa88ebf632252e97e550e5775e5 size: 2006
+
+
+
+### Task 8: document the procedure in a MarkDown file
+
+create a README.md file in the gitlab repo and add the technical procedure above (0-7) in this file
+
+0-7 upload gitlab 
+
+## Task 9: install a single node Kubernetes cluster using kubeadm
+https://kubernetes.io/docs/setup/independent/create-cluster-kubeadm/
+
+Check in the admin.conf file into the gitlab repo
+
+#### master  192.168.136.128
+
+kubeadm及kubernetes组件安装源
+deb https://mirrors.aliyun.com/kubernetes/apt kubernetes-xenial main
+
+yuze@k8s-master01:~$ curl -s https://mirrors.aliyun.com/kubernetes/apt/doc/apt-key.gpg| sudo apt-key add -
+OK
+
+yuze@k8s-master01:~$ sudo vim /etc/apt/sources.list.d/kubernetes.list
+
+yuze@ubuntu1604:~$ sudo apt-get install -y kubelet kubeadm kubectl --allow-unauthenticated
+
+yuze@ubuntu1604:~$ sudo swapoff -a
+
+yuze@ubuntu1604:~$ :q
+
+yuze@ubuntu1604:~$ systemctl disable firewalld
+
+yuze@ubuntu1604:~$ sudo apt install selinux-utils
+
+yuze@ubuntu1604:~$ sudo setenforce 0
+
+setenforce: SELinux is disabled
+
+yuze@ubuntu1604:~$ sudo systemctl status docker
+
+yuze@ubuntu1604:~$ sudo vim  /etc/docker/daemon.json
+
+
+{
+    "registry-mirrors": ["https://alzgoonw.mirror.aliyuncs.com"],
+    "live-restore": true
+}
+
+yuze@ubuntu1604:~$ sudo systemctl daemon-reload
+
+yuze@ubuntu1604:~$ sudo systemctl restart docker
+
+yuze@ubuntu1604:~$ sudo vim /etc/profile
+
+export KUBECONFIG=/etc/kubernetes/admin.conf
+
+yuze@ubuntu1604:~$ sudo systemctl daemon-reload
+
+yuze@k8s-master01:~$ sudo apt-get update && apt-get install -y kubelet kubeadm kubectl
+
+
+deb http://mirrors.ustc.edu.cn/kubernetes/apt kubernetes-xenial main
+
+yuze@ubuntu1604:~$ sudo systemctl restart kubelet
+
+yuze@ubuntu1604:~$ kubeadm config images list --kubernetes-version=v1.17.3
+
+W0217 03:37:54.552020   16573 validation.go:28] Cannot validate kube-proxy config - no validator is available
+
+W0217 03:37:54.552060   16573 validation.go:28] Cannot validate kubelet config - no validator is available
+k8s.gcr.io/kube-apiserver:v1.17.3
+k8s.gcr.io/kube-controller-manager:v1.17.3
+k8s.gcr.io/kube-scheduler:v1.17.3
+
+k8s.gcr.io/kube-proxy:v1.17.3
+k8s.gcr.io/pause:3.1
+k8s.gcr.io/etcd:3.4.3-0
+k8s.gcr.io/coredns:1.6.5
+
+docker pull registry.cn-hangzhou.aliyuncs.com/google_containers/kube-controller-manager:v1.17.3
+docker pull registry.cn-hangzhou.aliyuncs.com/google_containers/kube-scheduler:v1.17.3
+docker pull registry.cn-hangzhou.aliyuncs.com/google_containers/kube-proxy:v1.17.3
+docker pull registry.cn-hangzhou.aliyuncs.com/google_containers/pause:3.1
+docker pull registry.cn-hangzhou.aliyuncs.com/google_containers/etcd:3.4.3-0
+docker pull registry.cn-hangzhou.aliyuncs.com/google_containers/coredns:1.6.5
+docker pull registry.cn-hangzhou.aliyuncs.com/google_containers/kube-apiserver:v1.17.3
+
+
+docker tag registry.cn-hangzhou.aliyuncs.com/google_containers/kube-apiserver:v1.17.3 k8s.gcr.io/kube-apiserver:v1.17.3
+docker tag registry.cn-hangzhou.aliyuncs.com/google_containers/kube-controller-manager:v1.17.3 k8s.gcr.io/kube-controller-manager:v1.17.3
+docker tag registry.cn-hangzhou.aliyuncs.com/google_containers/kube-scheduler:v1.17.3 k8s.gcr.io/kube-scheduler:v1.17.3
+docker tag registry.cn-hangzhou.aliyuncs.com/google_containers/kube-proxy:v1.17.3 k8s.gcr.io/kube-proxy:v1.17.3
+docker tag registry.cn-hangzhou.aliyuncs.com/google_containers/pause:3.1 k8s.gcr.io/pause:3.1
+docker tag registry.cn-hangzhou.aliyuncs.com/google_containers/etcd:3.4.3-0 k8s.gcr.io/etcd:3.4.3-0
+docker tag registry.cn-hangzhou.aliyuncs.com/google_containers/coredns:1.6.5 k8s.gcr.io/coredns:1.6.5
+
+
+yuze@k8s-master01:~$ sudo systemctl daemon-reload
+yuze@k8s-master01:~$ sudo systemctl restart kubelet
+
+yuze@ubuntu1604:~$ sudo kubeadm init --pod-network-cidr=10.244.0.0/16 --apiserver-advertise-address=192.168.136.130 --kubernetes-version=v1.17.3 --ignore-preflight-errors=Swap
+
+yuze@ubuntu1604:~$ mkdir -p $HOME/.kube
+yuze@ubuntu1604:~$ sudo cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
+yuze@ubuntu1604:~$ sudo chown $(id -u):$(id -g) $HOME/.kube/config
+
+yuze@ubuntu1604:~$ sudo kubectl get nodes
+NAME         STATUS     ROLES    AGE     VERSION
+ubuntu1604   NotReady   master   2m29s   v1.17.3
+yuze@ubuntu1604:~$ sudo kubectl apply -f https://raw.githubusercontent.com/coreos/flannel/master/Documentation/kube-flannel.yml
+
+yuze@ubuntu1604:~$ sudo kubeadm join 192.168.136.128:6443 --token 26htfc.g39j4f0njlh55gxt     --discovery-token-ca-cert-hash sha256:1234c1cafa83cc6e641077b0c3a88edfe2a12ec7ace7596184a8788e8aabd2d0 --ignore-preflight-errors=all
+
+#### node 192.168.136.131 电脑配置太低，无法看 node效果
+
+### Task 10: deploy the hello world container
+
+in the kubernetes above and expose the service to nodePort 31080
+
+Expect output:
+```
+curl http://127.0.0.1:31080
+Go Web Hello World!
+
+### Task 11: install kubernetes dashboard
+
+and expose the service to nodeport 31081
+
+https://kubernetes.io/docs/tasks/access-application-cluster/web-ui-dashboard/
+
+Expect output: https://127.0.0.1:31081 (asking for token)
+
+### Task 12: generate token for dashboard login in task 11
+
+figure out how to generate token to login to the dashboard and publish the procedure to the gitlab.
+
+### Task 13: publish your work
+
+push all files/procedures in your local gitlab repo to remote github repo (e.g. https://github.com/your_github_id/go-web-hello-world)
+
+
+
+
+
+
+
+
